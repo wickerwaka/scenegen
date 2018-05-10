@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 import sys
 import argparse
 import configparser
@@ -75,11 +75,14 @@ def main():
     parser.add_argument('-f', '--filter', help='Comma separated list of device collections as defined in mapfile')
     parser.add_argument('-c', '--colortype', help='color type to use', default='xy_color', choices=LIGHT_COLOR_TYPES)
     parser.add_argument('-t', '--types', help='list of device types to include', default='light,switch')
+    parser.add_argument('-i', '--source-scene', help='Get entity list and scenename from an existing scene YAML file')
+    parser.add_argument('-o', '--output', help='Output file, defaults to STDOUT')
     parser.add_argument('--no-sslverify', help='disables SSL verification, useful for self signed certificates', action='store_true')
     parser.add_argument('--cacerts', help='alternative set of trusted CA certificates to use for connecting to Home Assistant')
     args = parser.parse_args()
 
     filter_list = []
+    scenename = args.scenename
     if args.mapfile and args.filter:
         filters = args.filter.split(',')
 
@@ -90,6 +93,15 @@ def main():
         for section in config.sections():
             if section in filters:
                 filter_list.extend(config.options(section))
+
+        if not filter_list:
+            error('No entities found in mapfile {}, sections {}'.format(args.mapfile, args.filter))
+    elif args.source_scene:
+        with open(args.source_scene, 'r') as fobj:
+            scene = yaml.load(fobj)
+            if scenename == parser.get_default('scenename'):
+                scenename = scene['name']
+            filter_list = scene['entities'].keys()
 
     # Check if to disable SSL verification, or provide alternative CA certs
     ssl_verify = None
@@ -104,9 +116,9 @@ def main():
         error('Unknown error occured while trying to read the state from Home Assistant: {}'.format(str(exc)))
 
     # Iterate all entities and produce a scene
-    output = {'entities': {}, 'name': args.scenename}
+    output = {'entities': {}, 'name': scenename}
     for state in states:
-        if args.mapfile and args.filter:
+        if filter_list:
             # If we're provided with a map file and filter list, exclude the match entities
             if state['entity_id'] not in filter_list:
                 continue
@@ -114,8 +126,13 @@ def main():
         if entity_state:
             output['entities'].update(entity_state)
 
-    # Write the resulting YAML to stdout
-    sys.stdout.write(yaml.dump(output, default_flow_style=False))
+    # Write the resulting YAML
+    yaml_str = yaml.dump(output, default_flow_style=False)
+    if args.output:
+        with open(args.output, 'w') as fobj:
+            fobj.write(yaml_str)
+    else:
+        sys.stdout.write(yaml_str)
 
 if __name__ == '__main__':
     main()
